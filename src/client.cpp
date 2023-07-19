@@ -271,7 +271,7 @@ void CClient::SendInput()
 
 		// pack it
 		for(int i = 0; i < Size/4; i++)
-			Msg.AddInt(rand() % 2);
+			Msg.AddInt(m_aInputs[0][m_CurrentInput[0]].m_aData[i]);
 
 		m_CurrentInput[0]++;
 		m_CurrentInput[0]%=200;
@@ -428,6 +428,11 @@ void CClient::OnEnterGame()
 	m_CurrentRecvTick[0] = 0;
 	m_CurGameTick[0] = 0;
 	m_PrevGameTick[0] = 0;
+
+	CMsgPacker Msg(NETMSGTYPE_CL_ISDDNET);
+	Msg.AddInt(2004);
+	SendMsgExY(&Msg, MSGFLAG_VITAL,false, 0);
+	m_DDRaceMsgSent = true;
 }
 
 void CClient::InfoRequestImpl(const NETADDR &Addr)
@@ -877,14 +882,6 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket)
 						int64 TickStart = GameTick*time_freq()/50;
 						int64 TimeLeft = (TickStart-Now)*1000 / time_freq();
 						m_GameTime[0].Update((GameTick-1)*time_freq()/50, TimeLeft, 0);
-					}
-
-					if(m_ReceivedSnapshots[0] > 50 && !m_DDRaceMsgSent)
-					{
-						CMsgPacker Msg(NETMSGTYPE_CL_ISDDNET);
-						Msg.AddInt(2004);
-						SendMsgExY(&Msg, MSGFLAG_VITAL,false, 0);
-						m_DDRaceMsgSent = true;
 					}
 
 					// ack snapshot
