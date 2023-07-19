@@ -1,5 +1,8 @@
 #include <new>
 #include "client.h"
+#include "main.h"
+
+char m_DesiredName[MAX_NAME_LENGTH];
 
 static CClient *CreateClient()
 {
@@ -27,11 +30,12 @@ int main(int argc, const char **argv)
 
 	if (argc < 2)
 	{
-		dbg_msg("chatonly", "usage: chatonly [ip address]");
+		dbg_msg("chatonly", "usage: chatonly <ip address> [player name]");
 		return 0;
 	}
 
 	str_copy(pClient->m_aCmdConnect, argv[1], sizeof(pClient->m_aCmdConnect));
+	str_copy(m_DesiredName, (argc > 2) ? argv[2] : "chatonly", MAX_NAME_LENGTH);
 	pClient->Run();
 
 	return 0;

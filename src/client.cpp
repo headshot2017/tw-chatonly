@@ -2,6 +2,7 @@
 #include "generated_protocol.h"
 #include "compression.h"
 #include "mastersrv.h"
+#include "main.h"
 
 void CSmoothTime::Init(int64 Target)
 {
@@ -679,7 +680,8 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket)
 		else if((pPacket->m_Flags&NET_CHUNKFLAG_VITAL) != 0 && Msg == NETMSG_CON_READY)
 		{
 			CNetMsg_Cl_StartInfo Msg;
-			Msg.m_pName = "chatonly";
+			//Msg.m_pName = "chatonly";
+			Msg.m_pName = m_DesiredName;
 			Msg.m_pClan = "test";
 			Msg.m_Country = 0;
 			Msg.m_pSkin = "oldschool";
