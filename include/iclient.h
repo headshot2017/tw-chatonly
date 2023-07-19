@@ -81,9 +81,27 @@ public:
 	// networking
 	virtual void EnterGame() = 0;
 
+	//
+	//virtual const char *MapDownloadName() = 0;
+	//virtual int MapDownloadAmount() = 0;
+	//virtual int MapDownloadTotalsize() = 0;
+
 	// input
 	//virtual int *GetInput(int Tick) = 0;
 	//virtual bool InputExists(int Tick) = 0;
+
+	// remote console
+	//virtual void RconAuth(const char *pUsername, const char *pPassword) = 0;
+	//virtual bool RconAuthed() = 0;
+	//virtual bool UseTempRconCommands() = 0;
+	//virtual void Rcon(const char *pLine) = 0;
+
+	// server info
+	virtual void GetServerInfo(class CServerInfo *pServerInfo) = 0;
+
+	//virtual void CheckVersionUpdate() = 0;
+
+	// snapshot interface
 
 	enum
 	{
@@ -133,4 +151,5 @@ public:
 	virtual bool EditorHasUnsavedData() = 0;
 	*/
 };
+
 #endif

@@ -5,6 +5,7 @@
 #include "network.h"
 #include "engine.h"
 #include "snapshot.h"
+#include "serverbrowser.h"
 
 class CSmoothTime
 {
@@ -46,8 +47,6 @@ class CClient : public IClient
 
 	NETADDR m_ServerAddress;
 	int m_SnapCrcErrors;
-	bool m_AutoScreenshotRecycle;
-	bool m_AutoStatScreenshotRecycle;
 
 	int m_AckGameTick[2];
 	int m_CurrentRecvTick[2];
@@ -90,7 +89,9 @@ class CClient : public IClient
 	char *m_aDemorecSnapshotData[NUM_SNAPSHOT_TYPES][2][CSnapshot::MAX_SIZE];
 
 	class CSnapshotDelta m_SnapshotDelta;
-	
+
+	//
+	class CServerInfo m_CurrentServerInfo;
 	int64 m_CurrentServerInfoRequestTime; // >= 0 should request, == -1 got info
 
 	// version info
@@ -113,16 +114,17 @@ public:
 
 	CClient();
 
+	// ----- send functions -----
+	virtual int SendMsg(CMsgPacker *pMsg, int Flags);
+	virtual int SendMsgExY(CMsgPacker *pMsg, int Flags, bool System=true, int NetClient=1);
+
 	//
 	char m_aCmdConnect[256];
 	virtual void Connect(const char *pAddress);
 	virtual void DisconnectWithReason(const char *pReason);
 	virtual void Disconnect();
 
-	// ----- send functions -----
-	virtual int SendMsg(CMsgPacker *pMsg, int Flags);
-	virtual int SendMsgExY(CMsgPacker *pMsg, int Flags, bool System=true, int NetClient=1);
-	virtual int SendMsgEx(CMsgPacker *pMsg, int Flags, bool System=true);
+	int SendMsgEx(CMsgPacker *pMsg, int Flags, bool System=true);
 	void SendInfo();
 	void SendEnterGame();
 	void SendReady();
@@ -135,6 +137,7 @@ public:
 	void OnEnterGame();
 	virtual void EnterGame();
 
+	virtual void GetServerInfo(class CServerInfo *pServerInfo);
 	void ServerInfoRequest();
 
 	// ---
@@ -149,7 +152,11 @@ public:
 	const char *LatestVersion();
 	virtual bool ConnectionProblems();
 
+	void ProcessConnlessPacket(CNetChunk *pPacket);
 	void ProcessServerPacket(CNetChunk *pPacket);
+
+	void InfoRequestImpl(const NETADDR &Addr);
+	void InfoRequestImpl64(const NETADDR &Addr);
 
 	void RegisterInterfaces();
 	void InitInterfaces();

@@ -1,6 +1,7 @@
 #include "client.h"
 #include "generated_protocol.h"
 #include "compression.h"
+#include "mastersrv.h"
 
 void CSmoothTime::Init(int64 Target)
 {
@@ -93,8 +94,6 @@ CClient::CClient() : IClient()
 	m_GameTickSpeed = SERVER_TICK_SPEED;
 
 	m_SnapCrcErrors = 0;
-	m_AutoScreenshotRecycle = false;
-	m_AutoStatScreenshotRecycle = false;
 
 	m_AckGameTick[0] = -1;
 	m_AckGameTick[1] = -1;
@@ -154,6 +153,9 @@ CClient::CClient() : IClient()
 	m_ReceivedSnapshots[1] = 0;
 
 	m_VersionInfo.m_State = CVersionInfo::STATE_INIT;
+
+	for(int i = 0; i < NUM_NETOBJTYPES; i++)
+		SnapSetStaticsize(i, m_NetObjHandler.GetObjSize(i));
 }
 
 // ----- send functions -----
@@ -402,8 +404,14 @@ bool CClient::ConnectionProblems()
 	return m_NetClient[0].GotProblems() != 0;
 }
 
+void CClient::GetServerInfo(CServerInfo *pServerInfo)
+{
+	mem_copy(pServerInfo, &m_CurrentServerInfo, sizeof(m_CurrentServerInfo));
+}
+
 void CClient::ServerInfoRequest()
 {
+	mem_zero(&m_CurrentServerInfo, sizeof(m_CurrentServerInfo));
 	m_CurrentServerInfoRequestTime = 0;
 }
 
@@ -419,6 +427,40 @@ void CClient::OnEnterGame()
 	m_CurrentRecvTick[0] = 0;
 	m_CurGameTick[0] = 0;
 	m_PrevGameTick[0] = 0;
+}
+
+void CClient::InfoRequestImpl(const NETADDR &Addr)
+{
+	unsigned char Buffer[sizeof(SERVERBROWSE_GETINFO)+1];
+	CNetChunk Packet;
+
+	mem_copy(Buffer, SERVERBROWSE_GETINFO, sizeof(SERVERBROWSE_GETINFO));
+	Buffer[sizeof(SERVERBROWSE_GETINFO)] = 1;
+
+	Packet.m_ClientID = -1;
+	Packet.m_Address = Addr;
+	Packet.m_Flags = NETSENDFLAG_CONNLESS;
+	Packet.m_DataSize = sizeof(Buffer);
+	Packet.m_pData = Buffer;
+
+	m_NetClient[2].Send(&Packet);
+}
+
+void CClient::InfoRequestImpl64(const NETADDR &Addr)
+{
+	unsigned char Buffer[sizeof(SERVERBROWSE_GETINFO64)+1];
+	CNetChunk Packet;
+
+	mem_copy(Buffer, SERVERBROWSE_GETINFO64, sizeof(SERVERBROWSE_GETINFO64));
+	Buffer[sizeof(SERVERBROWSE_GETINFO64)] = 1;
+
+	Packet.m_ClientID = -1;
+	Packet.m_Address = Addr;
+	Packet.m_Flags = NETSENDFLAG_CONNLESS;
+	Packet.m_DataSize = sizeof(Buffer);
+	Packet.m_pData = Buffer;
+
+	m_NetClient[2].Send(&Packet);
 }
 
 void CClient::RegisterInterfaces()
@@ -488,6 +530,107 @@ int CClient::SnapNumItems(int SnapID)
 void CClient::SnapSetStaticsize(int ItemType, int Size)
 {
 	m_SnapshotDelta.SetStaticsize(ItemType, Size);
+}
+
+void CClient::ProcessConnlessPacket(CNetChunk *pPacket)
+{
+	// server info
+	if(pPacket->m_DataSize >= (int)sizeof(SERVERBROWSE_INFO) && mem_comp(pPacket->m_pData, SERVERBROWSE_INFO, sizeof(SERVERBROWSE_INFO)) == 0)
+	{
+		// we got ze info
+		CUnpacker Up;
+		CServerInfo Info = {0};
+
+		Up.Reset((unsigned char*)pPacket->m_pData+sizeof(SERVERBROWSE_INFO), pPacket->m_DataSize-sizeof(SERVERBROWSE_INFO));
+		int Token = str_toint(Up.GetString());
+		str_copy(Info.m_aVersion, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aVersion));
+		str_copy(Info.m_aName, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aName));
+		str_copy(Info.m_aMap, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aMap));
+		str_copy(Info.m_aGameType, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aGameType));
+		Info.m_Flags = str_toint(Up.GetString());
+		Info.m_NumPlayers = str_toint(Up.GetString());
+		Info.m_MaxPlayers = str_toint(Up.GetString());
+		Info.m_NumClients = str_toint(Up.GetString());
+		Info.m_MaxClients = str_toint(Up.GetString());
+
+		// don't add invalid info to the server browser list
+		if(Info.m_NumClients < 0 || Info.m_NumClients > MAX_CLIENTS || Info.m_MaxClients < 0 || Info.m_MaxClients > MAX_CLIENTS ||
+			Info.m_NumPlayers < 0 || Info.m_NumPlayers > Info.m_NumClients || Info.m_MaxPlayers < 0 || Info.m_MaxPlayers > Info.m_MaxClients)
+			return;
+
+		net_addr_str(&pPacket->m_Address, Info.m_aAddress, sizeof(Info.m_aAddress), true);
+
+		for(int i = 0; i < Info.m_NumClients; i++)
+		{
+			str_copy(Info.m_aClients[i].m_aName, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aClients[i].m_aName));
+			str_copy(Info.m_aClients[i].m_aClan, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aClients[i].m_aClan));
+			Info.m_aClients[i].m_Country = str_toint(Up.GetString());
+			Info.m_aClients[i].m_Score = str_toint(Up.GetString());
+			Info.m_aClients[i].m_Player = str_toint(Up.GetString()) != 0 ? true : false;
+		}
+
+		if(!Up.Error())
+		{
+			if(net_addr_comp(&m_ServerAddress, &pPacket->m_Address) == 0)
+			{
+				if(m_CurrentServerInfo.m_MaxClients <= VANILLA_MAX_CLIENTS)
+				{
+					mem_copy(&m_CurrentServerInfo, &Info, sizeof(m_CurrentServerInfo));
+					m_CurrentServerInfo.m_NetAddr = m_ServerAddress;
+					m_CurrentServerInfoRequestTime = -1;
+				}
+			}
+		}
+	}
+
+	// server info 64
+	if(pPacket->m_DataSize >= (int)sizeof(SERVERBROWSE_INFO64) && mem_comp(pPacket->m_pData, SERVERBROWSE_INFO64, sizeof(SERVERBROWSE_INFO64)) == 0)
+	{
+		// we got ze info
+		CUnpacker Up;
+		CServerInfo NewInfo = {0};
+		CServerInfo &Info = NewInfo;
+
+		Up.Reset((unsigned char*)pPacket->m_pData+sizeof(SERVERBROWSE_INFO64), pPacket->m_DataSize-sizeof(SERVERBROWSE_INFO64));
+		int Token = str_toint(Up.GetString());
+		str_copy(Info.m_aVersion, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aVersion));
+		str_copy(Info.m_aName, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aName));
+		str_copy(Info.m_aMap, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aMap));
+		str_copy(Info.m_aGameType, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aGameType));
+		Info.m_Flags = str_toint(Up.GetString());
+		Info.m_NumPlayers = str_toint(Up.GetString());
+		Info.m_MaxPlayers = str_toint(Up.GetString());
+		Info.m_NumClients = str_toint(Up.GetString());
+		Info.m_MaxClients = str_toint(Up.GetString());
+
+		// don't add invalid info to the server browser list
+		if(Info.m_NumClients < 0 || Info.m_NumClients > MAX_CLIENTS || Info.m_MaxClients < 0 || Info.m_MaxClients > MAX_CLIENTS ||
+			Info.m_NumPlayers < 0 || Info.m_NumPlayers > Info.m_NumClients || Info.m_MaxPlayers < 0 || Info.m_MaxPlayers > Info.m_MaxClients)
+			return;
+
+		net_addr_str(&pPacket->m_Address, Info.m_aAddress, sizeof(Info.m_aAddress), true);
+
+		int Offset = Up.GetInt();
+
+		for(int i = max(Offset, 0); i < max(Offset, 0) + 24 && i < MAX_CLIENTS; i++)
+		{
+			str_copy(Info.m_aClients[i].m_aName, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aClients[i].m_aName));
+			str_copy(Info.m_aClients[i].m_aClan, Up.GetString(CUnpacker::SANITIZE_CC|CUnpacker::SKIP_START_WHITESPACES), sizeof(Info.m_aClients[i].m_aClan));
+			Info.m_aClients[i].m_Country = str_toint(Up.GetString());
+			Info.m_aClients[i].m_Score = str_toint(Up.GetString());
+			Info.m_aClients[i].m_Player = str_toint(Up.GetString()) != 0 ? true : false;
+		}
+
+		if(!Up.Error())
+		{
+			if(net_addr_comp(&m_ServerAddress, &pPacket->m_Address) == 0)
+			{
+				mem_copy(&m_CurrentServerInfo, &Info, sizeof(m_CurrentServerInfo));
+				m_CurrentServerInfo.m_NetAddr = m_ServerAddress;
+				m_CurrentServerInfoRequestTime = -1;
+			}
+		}
+	}
 }
 
 void CClient::ProcessServerPacket(CNetChunk *pPacket)
@@ -662,7 +805,7 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket)
 					SnapSize = m_SnapshotDelta.UnpackDelta(pDeltaShot, pTmpBuffer3, pDeltaData, DeltaSize);
 					if(SnapSize < 0)
 					{
-						//dbg_msg("client", "delta unpack failed!");
+						dbg_msg("client", "delta unpack failed!");
 						return;
 					}
 
@@ -973,7 +1116,7 @@ void CClient::PumpNetwork()
 		{
 			if(Packet.m_ClientID == -1 || i > 1)
 			{
-				//ProcessConnlessPacket(&Packet);
+				ProcessConnlessPacket(&Packet);
 			}
 			else if(i != 1)
 			{
@@ -1107,6 +1250,17 @@ void CClient::Update()
 				// send input
 				SendInput();
 			}
+		}
+
+		// fetch server info if we don't have it
+		if(State() >= IClient::STATE_LOADING &&
+			m_CurrentServerInfoRequestTime >= 0 &&
+			time_get() > m_CurrentServerInfoRequestTime)
+		{
+			// Call both because we can't know what kind the server is
+			InfoRequestImpl(m_ServerAddress);
+			InfoRequestImpl64(m_ServerAddress);
+			m_CurrentServerInfoRequestTime = time_get()+time_freq()*2;
 		}
 	}
 
