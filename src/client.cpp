@@ -271,7 +271,7 @@ void CClient::SendInput()
 
 		// pack it
 		for(int i = 0; i < Size/4; i++)
-			Msg.AddInt(m_aInputs[0][m_CurrentInput[0]].m_aData[i]);
+			Msg.AddInt(rand() % 2);
 
 		m_CurrentInput[0]++;
 		m_CurrentInput[0]%=200;
@@ -1065,9 +1065,6 @@ void CClient::ProcessServerPacket(CNetChunk *pPacket)
 			}
 			else if(Msg == NETMSGTYPE_SV_CHAT)
 			{
-				CMsgPacker Msg(NETMSGTYPE_CL_ISDDNET);
-				Msg.AddInt(2004);
-				SendMsgExY(&Msg, MSGFLAG_VITAL,false, 0);
 				CNetMsg_Sv_Chat *pMsg = (CNetMsg_Sv_Chat *)pRawMsg;
 				if (pMsg->m_ClientID == -1)
 					dbg_msg("chat", "*** %s", pMsg->m_pMessage);
@@ -1204,7 +1201,6 @@ void CClient::Update()
 						// go trough all the items in the snapshot and gather the info we want
 						{
 							int Num = SnapNumItems(IClient::SNAP_CURRENT);
-							dbg_msg("snap", "%d snaps", Num);
 							for(int i = 0; i < Num; i++)
 							{
 								IClient::CSnapItem Item;
